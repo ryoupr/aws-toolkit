@@ -1,0 +1,235 @@
+# ### **テンプレート概要**
+# このテンプレートは、AWSのネットワークファイアウォール、NATゲートウェイ、EC2インスタンスを含むシステムアーキテクチャを作成するためのものです。以下の主要リソースとその役割について説明します。
+
+# ---
+
+# ### **主要リソース**
+# 1. **ネットワーク構成**
+#    - **VPC**: プライベートネットワーク環境を提供 (`10.0.0.0/16`)。
+#    - **サブネット**:
+#      - **パブリックサブネット**: `10.0.1.0/24`（インターネットアクセス可能）。
+#      - **プライベートサブネット**: `10.0.2.0/24`（インターネット非公開）。
+#    - **インターネットゲートウェイ**: パブリックサブネットをインターネットに接続。
+#    - **NATゲートウェイ**: プライベートサブネット内のインスタンスがインターネットにアクセスするためのルート。
+
+# 2. **ルーティング**
+#    - **パブリックルートテーブル**: インターネットゲートウェイを介して通信をルーティング。
+#    - **プライベートルートテーブル**: NATゲートウェイを介して通信をルーティング。
+
+# 3. **セキュリティ**
+#    - **ネットワークファイアウォール**:
+#      - **FirewallPolicy**: ステートレスおよびステートフルなルールセットの定義（現在は空のルール参照）。
+#      - **Firewall**: パブリックサブネットにデプロイ。
+#    - **セキュリティグループ**: EC2インスタンスのSSHアクセス（ポート22）を許可。
+
+# 4. **EC2インスタンス**
+#    - **AMI**: Amazon Linux 2023。
+#    - **インスタンスプロファイル**: AWS Systems Manager（SSM）への統合を提供。
+#    - **SSHアクセス**: キーペアを使用した接続が可能。
+
+# 5. **IAMリソース**
+#    - **SSM IAMロール**: EC2インスタンスがSSMを利用可能に。
+#    - **インスタンスプロファイル**: EC2にIAMロールを付与。
+
+# ---
+
+# ### **目的**
+# このテンプレートは、セキュアなネットワーク構成と管理性の高いインスタンス運用を提供します。ネットワークファイアウォールによるセキュリティポリシーの拡張が可能であり、NATゲートウェイを通じたプライベートサブネットからの安全なインターネットアクセスを実現します。
+
+# ---
+
+# ### **用途**
+# - セキュリティを重視したAWS環境の構築。
+# - ファイアウォールポリシーの管理・拡張を伴うネットワークセキュリティの強化。
+# - プライベートサブネットを使用したアプリケーションサーバーやデータベースサーバーのデプロイ。
+
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Network Firewall, NAT Gateway, and EC2 instance architecture.'
+
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: 'NFW-VPC'
+
+  PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: 'Public-Subnet'
+
+  PrivateSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.2.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: 'Private-Subnet'
+
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: 'NFW-InternetGateway'
+
+  AttachGateway:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  RouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: 'Public-RouteTable'
+
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+
+  NatGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      AllocationId: !GetAtt ElasticIP.AllocationId
+      Tags:
+        - Key: Name
+          Value: 'NFW-NATGateway'
+
+  ElasticIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: 'vpc'
+
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: 'Private-RouteTable'
+
+  PrivateRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  NetworkFirewall:
+    Type: 'AWS::NetworkFirewall::Firewall'
+    Properties:
+      FirewallName: 'NFW-Firewall'
+      FirewallPolicyArn: !Ref FirewallPolicy
+      VpcId: !Ref VPC
+      SubnetMappings:
+        - SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: 'NFW-Firewall'
+
+  FirewallPolicy:
+    Type: 'AWS::NetworkFirewall::FirewallPolicy'
+    Properties:
+      FirewallPolicyName: 'NFW-Firewall-Policy'
+      FirewallPolicy:
+        StatelessDefaultActions:
+          - aws:forward_to_sfe
+        StatelessFragmentDefaultActions:
+          - aws:forward_to_sfe
+        StatelessRuleGroupReferences: []
+        StatefulRuleGroupReferences: []
+      Tags:
+        - Key: Name
+          Value: 'NFW-Firewall-Policy'
+
+  EC2KeyPair:
+    Type: 'AWS::EC2::KeyPair'
+    Properties:
+      KeyName: 'auto-generated-key'
+      Tags:
+        - Key: Name
+          Value: 'NFW-EC2-KeyPair'
+
+  SSMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'SSM-EC2-Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Tags:
+        - Key: Name
+          Value: 'SSM-EC2-Role'
+
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: 'SSM-EC2-InstanceProfile'
+      Roles:
+        - !Ref SSMRole
+
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: 't3.micro'
+      SubnetId: !Ref PrivateSubnet
+      ImageId: 'ami-023ff3d4ab11b2525'  # Amazon Linux 2023
+      KeyName: !Ref EC2KeyPair
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: 'NFW-EC2-Instance'
+
+  InstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Enable SSH access'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: Name
+          Value: 'NFW-Instance-SG'
