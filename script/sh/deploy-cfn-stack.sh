@@ -7,16 +7,18 @@ read -p "CloudFormationテンプレートファイルのパスを入力してく
 read -p "デプロイするスタック名を入力してください: " STACK_NAME
 
 # テンプレートファイルからパラメータ名とデフォルト値を抽出
-PARAM_KEYS=$(yq eval '.Parameters | keys' "$TEMPLATE_FILE" | sed 's/- //g')
+PARAM_KEYS=$(yq eval '.Parameters | keys' "$TEMPLATE_FILE" 2>/dev/null | sed 's/- //g')
 
-# パラメータの値をユーザーから取得
+# パラメータが存在する場合のみパラメータの値をユーザーから取得
 PARAMETERS=""
-for KEY in $PARAM_KEYS; do
-    DEFAULT_VALUE=$(yq eval ".Parameters.$KEY.Default // \"\"" "$TEMPLATE_FILE")
-    read -p "パラメータ $KEY の値を入力してください (デフォルト: $DEFAULT_VALUE): " VALUE
-    VALUE=${VALUE:-$DEFAULT_VALUE}
-    PARAMETERS="$PARAMETERS $KEY=$VALUE"
-done
+if [ -n "$PARAM_KEYS" ]; then
+    for KEY in $PARAM_KEYS; do
+        DEFAULT_VALUE=$(yq eval ".Parameters.$KEY.Default // \"\"" "$TEMPLATE_FILE")
+        read -p "パラメータ $KEY の値を入力してください (デフォルト: $DEFAULT_VALUE): " VALUE
+        VALUE=${VALUE:-$DEFAULT_VALUE}
+        PARAMETERS="$PARAMETERS $KEY=$VALUE"
+    done
+fi
 
 # CloudFormationデプロイコマンドを実行
 # AWS CloudFormationスタックのデプロイを実行します
@@ -25,7 +27,11 @@ done
 # --parameter-overrides: テンプレートパラメータのオーバーライド
 # --capabilities: IAMリソースの作成権限を付与
 echo "AWS CloudFormationスタックをデプロイ中..."
-DEPLOY_COMMAND="aws cloudformation deploy --template-file \"$TEMPLATE_FILE\" --stack-name \"$STACK_NAME\" --parameter-overrides $PARAMETERS --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+DEPLOY_COMMAND="aws cloudformation deploy --template-file \"$TEMPLATE_FILE\" --stack-name \"$STACK_NAME\""
+if [ -n "$PARAMETERS" ]; then
+    DEPLOY_COMMAND="$DEPLOY_COMMAND --parameter-overrides $PARAMETERS"
+fi
+DEPLOY_COMMAND="$DEPLOY_COMMAND --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 eval $DEPLOY_COMMAND
 
 # デプロイ完了メッセージを表示する前に完了を待機
