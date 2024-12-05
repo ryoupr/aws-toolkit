@@ -10,7 +10,7 @@ TAGS=(
   # "Key=Name,Value=Production"
   "Key=Owner,Value=z"
   "Key=Environment,Value=dev"
-  "Key=Application,Value=reverse-proxy"
+  "Key=Application,Value=revpx"
 )
 
 # ALBに関連付けられたリスナーのARNを取得
