@@ -8,7 +8,7 @@ read -p "Enter the Load Balancer ARN: " LOAD_BALANCER_ARN
 # タグのキーと値を指定（複数のタグを追加可能）
 TAGS=(
   # "Key=Name,Value=Production"
-  "Key=Owner,Value=zeon"
+  "Key=Owner,Value=z"
   "Key=Environment,Value=dev"
   "Key=Application,Value=reverse-proxy"
 )
