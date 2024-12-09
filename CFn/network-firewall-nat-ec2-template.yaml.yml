@@ -1,49 +1,3 @@
-# ### **テンプレート概要**
-# このテンプレートは、AWSのネットワークファイアウォール、NATゲートウェイ、EC2インスタンスを含むシステムアーキテクチャを作成するためのものです。以下の主要リソースとその役割について説明します。
-
-# ---
-
-# ### **主要リソース**
-# 1. **ネットワーク構成**
-#    - **VPC**: プライベートネットワーク環境を提供 (`10.0.0.0/16`)。
-#    - **サブネット**:
-#      - **パブリックサブネット**: `10.0.1.0/24`（インターネットアクセス可能）。
-#      - **プライベートサブネット**: `10.0.2.0/24`（インターネット非公開）。
-#    - **インターネットゲートウェイ**: パブリックサブネットをインターネットに接続。
-#    - **NATゲートウェイ**: プライベートサブネット内のインスタンスがインターネットにアクセスするためのルート。
-
-# 2. **ルーティング**
-#    - **パブリックルートテーブル**: インターネットゲートウェイを介して通信をルーティング。
-#    - **プライベートルートテーブル**: NATゲートウェイを介して通信をルーティング。
-
-# 3. **セキュリティ**
-#    - **ネットワークファイアウォール**:
-#      - **FirewallPolicy**: ステートレスおよびステートフルなルールセットの定義（現在は空のルール参照）。
-#      - **Firewall**: パブリックサブネットにデプロイ。
-#    - **セキュリティグループ**: EC2インスタンスのSSHアクセス（ポート22）を許可。
-
-# 4. **EC2インスタンス**
-#    - **AMI**: Amazon Linux 2023。
-#    - **インスタンスプロファイル**: AWS Systems Manager（SSM）への統合を提供。
-#    - **SSHアクセス**: キーペアを使用した接続が可能。
-
-# 5. **IAMリソース**
-#    - **SSM IAMロール**: EC2インスタンスがSSMを利用可能に。
-#    - **インスタンスプロファイル**: EC2にIAMロールを付与。
-
-# ---
-
-# ### **目的**
-# このテンプレートは、セキュアなネットワーク構成と管理性の高いインスタンス運用を提供します。ネットワークファイアウォールによるセキュリティポリシーの拡張が可能であり、NATゲートウェイを通じたプライベートサブネットからの安全なインターネットアクセスを実現します。
-
-# ---
-
-# ### **用途**
-# - セキュリティを重視したAWS環境の構築。
-# - ファイアウォールポリシーの管理・拡張を伴うネットワークセキュリティの強化。
-# - プライベートサブネットを使用したアプリケーションサーバーやデータベースサーバーのデプロイ。
-
-
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Network Firewall, NAT Gateway, and EC2 instance architecture.'
 
@@ -58,7 +12,9 @@ Resources:
         - Key: Name
           Value: 'NFW-VPC'
 
-  PublicSubnet:
+
+# Subnet settings
+  NfwSubnet:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId: !Ref VPC
@@ -68,7 +24,7 @@ Resources:
         - Key: Name
           Value: 'Public-Subnet'
 
-  PrivateSubnet:
+  ProtectedSubnet:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId: !Ref VPC
@@ -76,7 +32,17 @@ Resources:
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
       Tags:
         - Key: Name
-          Value: 'Private-Subnet'
+          Value: 'Protected-Subnet'
+
+  NgwSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.3.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: 'Ngw-Subnet'
 
   InternetGateway:
     Type: 'AWS::EC2::InternetGateway'
@@ -91,31 +57,10 @@ Resources:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
-  RouteTable:
-    Type: 'AWS::EC2::RouteTable'
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: 'Public-RouteTable'
-
-  PublicRoute:
-    Type: 'AWS::EC2::Route'
-    Properties:
-      RouteTableId: !Ref RouteTable
-      DestinationCidrBlock: '0.0.0.0/0'
-      GatewayId: !Ref InternetGateway
-
-  SubnetRouteTableAssociation:
-    Type: 'AWS::EC2::SubnetRouteTableAssociation'
-    Properties:
-      SubnetId: !Ref PublicSubnet
-      RouteTableId: !Ref RouteTable
-
   NatGateway:
     Type: 'AWS::EC2::NatGateway'
     Properties:
-      SubnetId: !Ref PublicSubnet
+      SubnetId: !Ref NgwSubnet
       AllocationId: !GetAtt ElasticIP.AllocationId
       Tags:
         - Key: Name
@@ -126,26 +71,82 @@ Resources:
     Properties:
       Domain: 'vpc'
 
-  PrivateRouteTable:
+################
+# Route tables #
+################
+
+  NfwRouteTable:
     Type: 'AWS::EC2::RouteTable'
     Properties:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: 'Private-RouteTable'
+          Value: 'Nfw-RouteTable'
 
-  PrivateRoute:
+  NgwRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: 'Ngw-RouteTable'
+
+  ProtectedRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: 'Protected-RouteTable'
+
+##############
+# Add routes #
+##############
+
+  NfwSubnetDefaultRoute:
     Type: 'AWS::EC2::Route'
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref NfwRouteTable
       DestinationCidrBlock: '0.0.0.0/0'
-      NatGatewayId: !Ref NatGateway
+      GatewayId: !Ref NatGateway
 
-  PrivateSubnetRouteTableAssociation:
+  NgwSubnetDefaultRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref NgwRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref NatGateway
+
+  ProtectedSubnetDefaultRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref ProtectedRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      VpcEndpointId:  !Select [ 1 , !Split  [ ":" , !Select [ 0 , !GetAtt  NetworkFirewall.EndpointIds]]]
+
+###########################
+# Route table association #
+###########################
+
+  NgwSubnetRouteTableAssociation:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties:
-      SubnetId: !Ref PrivateSubnet
-      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref NgwSubnet
+      RouteTableId: !Ref NgwRouteTable
+  NfwSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref NfwSubnet
+      RouteTableId: !Ref NfwRouteTable
+  ProtectedSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref ProtectedSubnet
+      RouteTableId: !Ref ProtectedRouteTable
+
+####################
+# Network firewall #
+####################
 
   NetworkFirewall:
     Type: 'AWS::NetworkFirewall::Firewall'
@@ -154,7 +155,7 @@ Resources:
       FirewallPolicyArn: !Ref FirewallPolicy
       VpcId: !Ref VPC
       SubnetMappings:
-        - SubnetId: !Ref PublicSubnet
+        - SubnetId: !Ref NfwSubnet
       Tags:
         - Key: Name
           Value: 'NFW-Firewall'
@@ -210,7 +211,7 @@ Resources:
     Type: 'AWS::EC2::Instance'
     Properties:
       InstanceType: 't3.micro'
-      SubnetId: !Ref PrivateSubnet
+      SubnetId: !Ref ProtectedSubnet
       ImageId: 'ami-023ff3d4ab11b2525'  # Amazon Linux 2023
       KeyName: !Ref EC2KeyPair
       IamInstanceProfile: !Ref InstanceProfile
@@ -233,3 +234,10 @@ Resources:
       Tags:
         - Key: Name
           Value: 'NFW-Instance-SG'
+
+
+
+
+
+
+
